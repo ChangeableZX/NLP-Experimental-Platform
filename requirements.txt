@@ -1,0 +1,66 @@
+# ── Core UI ───────────────────────────────────────────────────────────────────
+# st.html() requires 1.31+
+streamlit>=1.31.0
+
+# ── Deep Learning ─────────────────────────────────────────────────────────────
+torch>=2.0.0
+# huggingface_hub>=0.23 supplies split_torch_state_dict_into_shards (required by
+# newer transformers); without this the benepar/T5/MarianMT imports will fail.
+huggingface_hub>=0.23.0
+transformers>=4.38.0
+# sentencepiece is required by the T5 tokenizer used inside benepar
+sentencepiece>=0.1.99
+# sacremoses is required by the Helsinki-NLP MarianMT tokenizer (m8)
+sacremoses>=0.0.53
+tokenizers>=0.15.0
+
+# ── NLP – spaCy stack ─────────────────────────────────────────────────────────
+spacy>=3.5.0
+# benepar: constituency parser used in m2
+benepar>=0.2.0
+# svgling: parse-tree SVG rendering used in m2
+svgling>=0.3.0
+# fastcoref: neural coreference resolution used in m5 (optional, falls back to rules)
+fastcoref>=2.1.0
+
+# ── NLP – NLTK ────────────────────────────────────────────────────────────────
+nltk>=3.8.0
+
+# ── NLP – Chinese ─────────────────────────────────────────────────────────────
+jieba>=0.42.1
+zhconv>=1.4.3
+
+# ── NLP – Embeddings / Vector models ─────────────────────────────────────────
+gensim>=4.3.0
+
+# ── ML / Numerics ─────────────────────────────────────────────────────────────
+numpy>=1.24.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# ── Networking ────────────────────────────────────────────────────────────────
+# requests: used in m5 for optional remote EDU segmentation API
+requests>=2.28.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-install steps (run once after pip install -r requirements.txt):
+#
+# 1. spaCy language models
+#    python -m spacy download en_core_web_sm
+#    python -m spacy download zh_core_web_sm
+#
+# 2. NLTK corpora  (auto-downloaded on first use, but can be pre-fetched):
+#    python -c "import nltk; nltk.download(['wordnet','omw-1.4','punkt','punkt_tab','averaged_perceptron_tagger','reuters','brown'])"
+#
+# 3. benepar model  (auto-downloaded on first use):
+#    python -c "import benepar; benepar.download('benepar_en3')"
+#
+# 4. Hugging Face models  (downloaded automatically on first load):
+#    - bert-base-uncased          (m4 WSD)
+#    - gpt2                       (m6 language model)
+#    - Helsinki-NLP/opus-mt-en-zh (m8 machine translation)
+#    - lxyuan/distilbert-base-multilingual-cased-sentiments-student (m9 sentiment)
