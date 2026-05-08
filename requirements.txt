@@ -23,6 +23,11 @@ benepar>=0.2.0
 svgling>=0.3.0
 fastcoref>=2.1.0
 
+# datasets 3.0+ migrated from pa.PyExtensionType to pa.ExtensionType,
+# fixing compatibility with PyArrow 18.x (the version with Python 3.14 wheels).
+# Pinning here ensures fastcoref pulls in the fixed version.
+datasets>=3.0.0
+
 # ── NLP – NLTK ────────────────────────────────────────────────────────────────
 nltk>=3.8.0
 

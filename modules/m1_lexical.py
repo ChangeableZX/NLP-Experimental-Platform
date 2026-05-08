@@ -5,39 +5,12 @@ import html as htmllib
 from collections import Counter
 
 import zhconv
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import spacy
 import streamlit as st
 
 from .common import render_module_header, sec_header
-
-logging_msg = None  # suppress jieba-style logging
-
-
-# ── matplotlib 中文字体 ──────────────────────────────────────────────────────
-@st.cache_resource
-def _cn_font():
-    try:
-        fm._rebuild()
-    except Exception:
-        pass
-    cands = [
-        "Noto Sans CJK SC", "Noto Serif CJK SC", "Noto Sans SC",
-        "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
-        "Microsoft YaHei", "SimHei", "SimSun", "FangSong", "KaiTi",
-        "STHeiti", "STSong", "Arial Unicode MS",
-    ]
-    avail = {f.name for f in fm.fontManager.ttflist}
-    return next((f for f in cands if f in avail), None)
-
-
-_FONT = _cn_font()
-if _FONT:
-    plt.rcParams["font.sans-serif"] = [_FONT] + plt.rcParams.get("font.sans-serif", [])
-plt.rcParams["axes.unicode_minus"] = False
 
 
 # ── spaCy 中文模型 ───────────────────────────────────────────────────────────
@@ -167,45 +140,57 @@ def chart_freq(freq):
         return None
     words  = [w for w, _ in freq]
     counts = [c for _, c in freq]
-    fig, ax = plt.subplots(figsize=(5.2, 2.8))
-    bars = ax.barh(words[::-1], counts[::-1], color=PALETTE[:len(words)], height=0.52)
-    ax.set_title("高频词 Top 5", fontsize=12, fontweight="bold", pad=7)
-    ax.set_xlabel("频次", fontsize=9)
-    for bar, c in zip(bars, counts[::-1]):
-        ax.text(bar.get_width() + .06, bar.get_y() + bar.get_height() / 2,
-                str(c), va="center", fontsize=9)
-    ax.set_xlim(0, max(counts) * 1.3)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    plt.tight_layout()
+    fig = go.Figure(go.Bar(
+        x=counts[::-1], y=words[::-1],
+        orientation="h",
+        marker_color=PALETTE[:len(words)],
+        text=[str(c) for c in counts[::-1]],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="高频词 Top 5",
+        xaxis_title="频次",
+        height=220,
+        margin=dict(l=10, r=50, t=40, b=10),
+        plot_bgcolor="rgba(247,250,252,1)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(size=13),
+    )
     return fig
 
 
 def chart_comparison(results, sentence):
     keys   = ["precise", "full", "search"]
-    labels = ["精确模式", "全模式", "搜索引擎"]
+    labels = ["精确模式", "全模式", "搜索引擎模式"]
     colors = ["#4e79a7", "#f28e2b", "#e15759"]
     token_cnt  = [len(results[k]) for k in keys]
     unique_cnt = [len(set(results[k])) for k in keys]
     avg_len    = [sum(len(w) for w in results[k]) / max(len(results[k]), 1) for k in keys]
-    fig, axes = plt.subplots(1, 3, figsize=(9, 3.0))
-    for ax, title, vals in zip(axes,
-                               ["分词总数", "唯一词数", "平均词长（字）"],
-                               [token_cnt, unique_cnt, avg_len]):
-        bars = ax.bar(labels, vals, color=colors, width=0.5)
-        ax.set_title(title, fontsize=10, fontweight="bold", pad=5)
-        for bar, v in zip(bars, vals):
-            ax.text(bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + .02 * max(vals, default=1),
-                    f"{v:.2f}" if isinstance(v, float) else str(v),
-                    ha="center", va="bottom", fontsize=8)
-        ax.set_ylim(0, max(vals) * 1.3 if max(vals) > 0 else 1)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.tick_params(axis="x", labelsize=8)
-    short = sentence if len(sentence) <= 20 else sentence[:20] + "…"
-    fig.suptitle(f'"{short}" — 三种算法统计对比', fontsize=10, fontweight="bold", y=1.03)
-    plt.tight_layout()
+
+    fig = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=["分词总数", "唯一词数", "平均词长（字）"],
+    )
+    for col, vals in enumerate([token_cnt, unique_cnt, avg_len], 1):
+        fig.add_trace(
+            go.Bar(
+                x=labels, y=vals,
+                marker_color=colors,
+                text=[f"{v:.2f}" if isinstance(v, float) else str(v) for v in vals],
+                textposition="outside",
+                showlegend=False,
+            ),
+            row=1, col=col,
+        )
+    short = sentence[:18] + "…" if len(sentence) > 18 else sentence
+    fig.update_layout(
+        title=dict(text=f'"{short}" — 三种算法统计对比', x=0.5),
+        height=300,
+        margin=dict(l=10, r=10, t=70, b=10),
+        plot_bgcolor="rgba(247,250,252,1)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(size=12),
+    )
     return fig
 
 
@@ -337,8 +322,7 @@ def render():
                 st.caption(f"共 {len(words)} 词 · 唯一 {len(set(words))} 词")
             if fig_freq:
                 st.caption("**词频统计（精确模式 Top 5）**")
-                st.pyplot(fig_freq, use_container_width=True)
-                plt.close(fig_freq)
+                st.plotly_chart(fig_freq, use_container_width=True)
 
         # 区块3：词性标注
         with c3:
@@ -398,9 +382,7 @@ def render():
                     unsafe_allow_html=True,
                 )
 
-        st.write("")
-        st.pyplot(fig_cmp, use_container_width=True)
-        plt.close(fig_cmp)
+        st.plotly_chart(fig_cmp, use_container_width=True)
 
         st.markdown(
             '<div class="cmp-note"><b>💡 算法说明</b><br>'
