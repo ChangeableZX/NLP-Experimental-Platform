@@ -1,6 +1,6 @@
 # NLP 综合实验平台
 
-> 基于 Streamlit 构建的自然语言处理综合实验平台，涵盖词法分析、句法解析、语义表示、语言模型、机器翻译、情感分析等九大核心模块，支持一键部署至 Streamlit Cloud。
+> 基于 Streamlit 构建的自然语言处理综合实验平台，涵盖词法分析、句法解析、语义表示、语言模型、机器翻译、情感分析等九大核心模块，支持一键部署至 Streamlit Cloud。本项目已经部署于[https://nlp-experimental-platform-rxkj4jgw45qpmpbvmtwvte.streamlit.app/](https://nlp-experimental-platform-rxkj4jgw45qpmpbvmtwvte.streamlit.app/)
 
 ---
 
