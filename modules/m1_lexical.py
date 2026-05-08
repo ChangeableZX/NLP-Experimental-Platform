@@ -21,8 +21,16 @@ logging.getLogger("jieba").setLevel(logging.WARNING)
 # ── matplotlib 中文字体 ──────────────────────────────────────────────────────
 @st.cache_resource
 def _cn_font():
-    cands = ["Microsoft YaHei", "SimHei", "SimSun", "FangSong", "KaiTi",
-             "STHeiti", "STSong", "Arial Unicode MS", "WenQuanYi Micro Hei"]
+    try:
+        fm._rebuild()
+    except Exception:
+        pass
+    cands = [
+        "Noto Sans CJK SC", "Noto Serif CJK SC", "Noto Sans SC",
+        "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+        "Microsoft YaHei", "SimHei", "SimSun", "FangSong", "KaiTi",
+        "STHeiti", "STSong", "Arial Unicode MS",
+    ]
     avail = {f.name for f in fm.fontManager.ttflist}
     return next((f for f in cands if f in avail), None)
 

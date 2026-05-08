@@ -522,7 +522,7 @@ def render():
         try:
             import fastcoref
             fastcoref_available = True
-        except ImportError:
+        except Exception:
             pass
 
         if fastcoref_available:

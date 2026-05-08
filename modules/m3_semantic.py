@@ -344,7 +344,7 @@ def render():
             with col_a:
                 word_a = st.text_input("A（正向）", value="library",   key="ana_a").strip().lower()
             with col_b:
-                word_b = st.text_input("B（负向）", value="book",      key="ana_b").strip().lower()
+                word_b = st.text_input("B（负向）", value="books",     key="ana_b").strip().lower()
             with col_c:
                 word_c = st.text_input("C（正向）", value="knowledge", key="ana_c").strip().lower()
 
