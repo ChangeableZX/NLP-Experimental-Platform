@@ -1,21 +1,20 @@
-﻿"""模块1：中文词法分析"""
+"""模块1：中文词法分析（spaCy 版，兼容 Python 3.14）"""
 
 import re
 import html as htmllib
 from collections import Counter
 
-import jieba
-import jieba.posseg as pseg
-import logging
+import zhconv
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import spacy
 import streamlit as st
 
 from .common import render_module_header, sec_header
 
-logging.getLogger("jieba").setLevel(logging.WARNING)
+logging_msg = None  # suppress jieba-style logging
 
 
 # ── matplotlib 中文字体 ──────────────────────────────────────────────────────
@@ -40,56 +39,73 @@ if _FONT:
     plt.rcParams["font.sans-serif"] = [_FONT] + plt.rcParams.get("font.sans-serif", [])
 plt.rcParams["axes.unicode_minus"] = False
 
-# ── 保留字符白名单 ────────────────────────────────────────────────────────────
+
+# ── spaCy 中文模型 ───────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="正在加载中文语言模型…")
+def _load_zh_nlp():
+    return spacy.load("zh_core_web_sm")
+
+
+# ── 保留字符白名单（文本规范化用） ────────────────────────────────────────────
 _KEEP_RE = re.compile(
     r"[^一-鿿㐀-䶿"
     r" -~\s"
     r"，。！？、；："
-    "“”‘’"
+    r"‘’“”"
     r"（）【】《》"
     r"…—～·]+"
 )
 
 STOPWORDS = {
-    "的","了","在","是","我","有","和","就","不","人","都","一","一个","上","也",
-    "很","到","说","要","去","你","会","着","没有","看","好","自己","这","那",
-    "他","她","们","我们","这个","那个","什么","怎么","但","但是","还","就是","可以",
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一", "一个", "上", "也",
+    "很", "到", "说", "要", "去", "你", "会", "着", "没有", "看", "好", "自己", "这", "那",
+    "他", "她", "们", "我们", "这个", "那个", "什么", "怎么", "但", "但是", "还", "就是", "可以",
 }
 
+# spaCy Universal POS → 中文标签 + 颜色
 POS_MAP = {
-    "nr": ("人名",   "#c0392b"), "ns": ("地名",   "#16a085"), "nt": ("机构名", "#2980b9"),
-    "nz": ("专有名词","#8e44ad"), "n":  ("名词",   "#e74c3c"), "vn": ("动名词", "#1a6ea8"),
-    "v":  ("动词",   "#2980b9"), "a":  ("形容词", "#27ae60"), "ad": ("副形词", "#1e8449"),
-    "d":  ("副词",   "#7d3c98"), "p":  ("介词",   "#e67e22"), "r":  ("代词",   "#17a589"),
-    "m":  ("数词",   "#b7950b"), "q":  ("量词",   "#1d8348"), "c":  ("连词",   "#626567"),
-    "u":  ("助词",   "#909497"), "x":  ("标点",   "#ccd1d1"), "eng":("English","#5dade2"),
+    "NOUN":  ("名词",   "#e74c3c"),
+    "VERB":  ("动词",   "#2980b9"),
+    "ADJ":   ("形容词", "#27ae60"),
+    "ADV":   ("副词",   "#7d3c98"),
+    "PROPN": ("专有名词","#8e44ad"),
+    "PRON":  ("代词",   "#17a589"),
+    "NUM":   ("数词",   "#b7950b"),
+    "PUNCT": ("标点",   "#ccd1d1"),
+    "PART":  ("助词",   "#909497"),
+    "ADP":   ("介词",   "#e67e22"),
+    "CCONJ": ("连词",   "#626567"),
+    "CONJ":  ("连词",   "#626567"),
+    "DET":   ("限定词", "#f39c12"),
+    "INTJ":  ("感叹词", "#e67e22"),
+    "SYM":   ("符号",   "#95a5a6"),
+    "X":     ("其他",   "#aab7b8"),
 }
 
-PALETTE = ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f",
-           "#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"]
+PALETTE = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
+           "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"]
 
 
-def fullwidth_to_halfwidth(text):
+# ── 文本规范化 ────────────────────────────────────────────────────────────────
+def _fullwidth_to_halfwidth(text):
     out = []
     for ch in text:
         cp = ord(ch)
-        if cp == 0x3000:   out.append(" ")
-        elif 0xFF01 <= cp <= 0xFF5E: out.append(chr(cp - 0xFEE0))
-        else: out.append(ch)
+        if cp == 0x3000:
+            out.append(" ")
+        elif 0xFF01 <= cp <= 0xFF5E:
+            out.append(chr(cp - 0xFEE0))
+        else:
+            out.append(ch)
     return "".join(out)
-
-
-def trad_to_simp(text):
-    try:
-        import zhconv
-        return zhconv.convert(text, "zh-hans")
-    except ImportError:
-        return text
 
 
 def normalize_text(text):
     steps, cur = [], text
-    for fn, name in [(trad_to_simp, "繁体 → 简体"), (fullwidth_to_halfwidth, "全角 → 半角")]:
+    for fn, name in [
+        (lambda t: zhconv.convert(t, "zh-hans"), "繁体 → 简体"),
+        (_fullwidth_to_halfwidth, "全角 → 半角"),
+    ]:
         nxt = fn(cur)
         steps.append({"name": name, "result": nxt, "changed": nxt != cur})
         cur = nxt
@@ -101,12 +117,31 @@ def normalize_text(text):
     return {"original": text, "normalized": nxt, "steps": steps}
 
 
-def do_segment(text):
-    return {
-        "precise": [w for w in jieba.cut(text, cut_all=False) if w.strip()],
-        "full":    [w for w in jieba.cut(text, cut_all=True)  if w.strip()],
-        "search":  [w for w in jieba.cut_for_search(text)     if w.strip()],
-    }
+# ── 分词（三种模式） ──────────────────────────────────────────────────────────
+def do_segment(text, nlp):
+    """
+    精确模式：spaCy 统计模型（最优分词）
+    全模式：字符级拆分（召回率最高，颗粒度最细）
+    搜索引擎模式：在精确分词基础上，将 3 字以上词条再切为 2-gram 叠加输出
+    """
+    doc = nlp(text)
+    precise = [t.text for t in doc if t.text.strip()]
+
+    # 全模式：每个汉字单独输出，ASCII 序列保留
+    full = []
+    for ch in text:
+        if ch.strip():
+            full.append(ch)
+
+    # 搜索引擎模式：精确词 + 长词拆分
+    search = list(precise)
+    for tok in precise:
+        hanzi = [c for c in tok if "一" <= c <= "鿿"]
+        if len(hanzi) >= 3:
+            for i in range(len(tok) - 1):
+                search.append(tok[i:i + 2])
+
+    return {"precise": precise, "full": full, "search": search}
 
 
 def top_freq(words, n=5):
@@ -114,20 +149,22 @@ def top_freq(words, n=5):
     return Counter(filt).most_common(n)
 
 
-def resolve_pos(flag):
-    if flag in POS_MAP: return POS_MAP[flag]
-    for pfx, info in POS_MAP.items():
-        if flag.startswith(pfx): return info
-    return ("其他", "#aab7b8")
+# ── 词性标注 ──────────────────────────────────────────────────────────────────
+def do_pos_tag(text, nlp):
+    doc = nlp(text)
+    result = []
+    for t in doc:
+        if not t.text.strip():
+            continue
+        label, color = POS_MAP.get(t.pos_, ("其他", "#aab7b8"))
+        result.append({"word": t.text, "flag": t.pos_, "label": label, "color": color})
+    return result
 
 
-def do_pos_tag(text):
-    return [{"word": w, "flag": f, **dict(zip(("label", "color"), resolve_pos(f)))}
-            for w, f in pseg.cut(text) if w.strip()]
-
-
+# ── 图表 ──────────────────────────────────────────────────────────────────────
 def chart_freq(freq):
-    if not freq: return None
+    if not freq:
+        return None
     words  = [w for w, _ in freq]
     counts = [c for _, c in freq]
     fig, ax = plt.subplots(figsize=(5.2, 2.8))
@@ -135,9 +172,11 @@ def chart_freq(freq):
     ax.set_title("高频词 Top 5", fontsize=12, fontweight="bold", pad=7)
     ax.set_xlabel("频次", fontsize=9)
     for bar, c in zip(bars, counts[::-1]):
-        ax.text(bar.get_width() + .06, bar.get_y() + bar.get_height()/2, str(c), va="center", fontsize=9)
-    ax.set_xlim(0, max(counts)*1.3)
-    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+        ax.text(bar.get_width() + .06, bar.get_y() + bar.get_height() / 2,
+                str(c), va="center", fontsize=9)
+    ax.set_xlim(0, max(counts) * 1.3)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     plt.tight_layout()
     return fig
 
@@ -148,23 +187,31 @@ def chart_comparison(results, sentence):
     colors = ["#4e79a7", "#f28e2b", "#e15759"]
     token_cnt  = [len(results[k]) for k in keys]
     unique_cnt = [len(set(results[k])) for k in keys]
-    avg_len    = [sum(len(w) for w in results[k])/max(len(results[k]),1) for k in keys]
+    avg_len    = [sum(len(w) for w in results[k]) / max(len(results[k]), 1) for k in keys]
     fig, axes = plt.subplots(1, 3, figsize=(9, 3.0))
-    for ax, title, vals in zip(axes, ["分词总数","唯一词数","平均词长（字）"], [token_cnt, unique_cnt, avg_len]):
+    for ax, title, vals in zip(axes,
+                               ["分词总数", "唯一词数", "平均词长（字）"],
+                               [token_cnt, unique_cnt, avg_len]):
         bars = ax.bar(labels, vals, color=colors, width=0.5)
         ax.set_title(title, fontsize=10, fontweight="bold", pad=5)
         for bar, v in zip(bars, vals):
-            ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+.02*max(vals, default=1),
-                    f"{v:.2f}" if isinstance(v, float) else str(v), ha="center", va="bottom", fontsize=8)
-        ax.set_ylim(0, max(vals)*1.3 if max(vals)>0 else 1)
-        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+            ax.text(bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + .02 * max(vals, default=1),
+                    f"{v:.2f}" if isinstance(v, float) else str(v),
+                    ha="center", va="bottom", fontsize=8)
+        ax.set_ylim(0, max(vals) * 1.3 if max(vals) > 0 else 1)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
         ax.tick_params(axis="x", labelsize=8)
-    fig.suptitle(f'"{sentence}" — 三种算法统计对比', fontsize=10, fontweight="bold", y=1.03)
+    short = sentence if len(sentence) <= 20 else sentence[:20] + "…"
+    fig.suptitle(f'"{short}" — 三种算法统计对比', fontsize=10, fontweight="bold", y=1.03)
     plt.tight_layout()
     return fig
 
 
-def e(s): return htmllib.escape(str(s))
+# ── HTML 辅助 ─────────────────────────────────────────────────────────────────
+def e(s):
+    return htmllib.escape(str(s))
 
 
 def chips_html(words, diff=None):
@@ -175,7 +222,7 @@ def chips_html(words, diff=None):
     return '<div class="chips-box">' + "".join(parts) + "</div>"
 
 
-# ── CSS 局部样式 ──────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 _CSS = """
 <style>
 .step-box{padding:.48rem .75rem;border-radius:6px;background:#f7fafc;
@@ -210,6 +257,7 @@ _CSS = """
 """
 
 
+# ── 主渲染函数 ────────────────────────────────────────────────────────────────
 def render():
     render_module_header(
         "m1",
@@ -222,14 +270,15 @@ def render():
         st.markdown("""
 | 功能 | 说明 | 技术 / 库 |
 |------|------|-----------|
-| 文本规范化 | 繁简体互转、全角→半角、去除特殊符号、统一空白字符，输出清洁文本 | `zhconv`, `re` |
-| 中文分词 | 提供精确模式（最小粒度）、全模式（所有可能词语）、搜索引擎模式（适合检索）三种切分策略 | `jieba` |
-| 词性标注 | 对每个分词结果标注词性（名词 / 动词 / 形容词等），并按词性分类着色展示 | `jieba.posseg` |
-| 高频词统计 | 过滤停用词后统计词频，绘制 Top-5 词条水平柱状图 | `collections.Counter`, `matplotlib` |
-| 算法对比 | 三种分词模式在分词总数、唯一词数、平均词长三个维度上的可视化对比 | `matplotlib` |
+| 文本规范化 | 繁简体互转、全角→半角、去除特殊符号、统一空白字符 | `zhconv`, `re` |
+| 中文分词 | 精确模式（spaCy 统计模型）、全模式（字符级拆分）、搜索引擎模式（精确词 + 长词拆分）| `spaCy` zh_core_web_sm |
+| 词性标注 | Universal POS 标注（名词/动词/形容词等），彩色标签展示 | `spaCy` zh_core_web_sm |
+| 高频词统计 | 过滤停用词后统计词频，绘制 Top-5 柱状图 | `collections.Counter`, `matplotlib` |
+| 算法对比 | 三种分词模式在词数、唯一词数、平均词长三维度上的可视化对比 | `matplotlib` |
 """)
 
-    main_text = st.text_area("输入文本", height=130, placeholder="请输入中文文本……",
+    main_text = st.text_area("输入文本", height=130,
+                              placeholder="请输入中文文本……",
                               label_visibility="collapsed")
     run = st.button("▶ 开始分析", type="primary")
 
@@ -238,15 +287,19 @@ def render():
             st.error("请先输入文本！")
             return
 
-        ambiguous = main_text.strip()
+        nlp = _load_zh_nlp()
+        if nlp is None:
+            st.error("中文语言模型加载失败，请检查 zh_core_web_sm 是否已安装。")
+            return
+
         with st.spinner("正在分析，请稍候…"):
             norm     = normalize_text(main_text)
-            seg      = do_segment(norm["normalized"])
+            seg      = do_segment(norm["normalized"], nlp)
             freq     = top_freq(seg["precise"])
-            pos_tags = do_pos_tag(norm["normalized"])
-            amb      = do_segment(ambiguous)
+            pos_tags = do_pos_tag(norm["normalized"], nlp)
+            amb      = do_segment(main_text.strip(), nlp)
             fig_freq = chart_freq(freq)
-            fig_cmp  = chart_comparison(amb, ambiguous)
+            fig_cmp  = chart_comparison(amb, main_text.strip())
 
         st.divider()
         c1, c2, c3 = st.columns(3, gap="medium")
@@ -261,8 +314,10 @@ def render():
             for s in norm["steps"]:
                 badge = '<span class="badge-chg">已修改</span>' if s["changed"] else ""
                 cls   = "step-box chg" if s["changed"] else "step-box"
-                steps_h += (f'<div class="{cls}"><div class="step-name">{e(s["name"])}{badge}</div>'
-                            f'<div class="step-text">{e(s["result"])}</div></div>')
+                steps_h += (
+                    f'<div class="{cls}"><div class="step-name">{e(s["name"])}{badge}</div>'
+                    f'<div class="step-text">{e(s["result"])}</div></div>'
+                )
             st.markdown(steps_h, unsafe_allow_html=True)
             st.caption("**规范化结果**")
             st.success(norm["normalized"])
@@ -271,9 +326,9 @@ def render():
         with c2:
             sec_header("✂️ 分词 & 词频统计", "pink")
             MODES = [
-                ("精确模式", "precise", "最精确切分，适合文本分析"),
-                ("全模式",   "full",    "扫描所有可能词语，含冗余"),
-                ("搜索引擎模式","search","在精确模式基础上对长词再切分"),
+                ("精确模式", "precise", "spaCy 统计模型，最优分词"),
+                ("全模式",   "full",    "字符级拆分，最大召回率"),
+                ("搜索引擎模式", "search", "精确词 + 长词拆分，提升检索覆盖"),
             ]
             for name, key, desc in MODES:
                 words = seg[key]
@@ -288,23 +343,25 @@ def render():
         # 区块3：词性标注
         with c3:
             sec_header("🏷️ 词性标注", "cyan")
-            PUNCT_CP = {0xff0c,0x3002,0xff01,0xff1f,0x3001,0xff1b,0xff1a,
-                        0x201c,0x201d,0x2018,0x2019,0xff08,0xff09,0x3010,0x3011,
-                        0x300a,0x300b,0x2026,0x2014,0xff5e,0x00b7,0x0020}
             seen = {}
             pw_h = '<div class="pos-box">'
             for t in pos_tags:
                 w = t["word"]
-                if t["flag"] == "x" or (len(w)==1 and ord(w) in PUNCT_CP):
+                if t["flag"] == "PUNCT" or t["flag"] == "SPACE":
                     pw_h += f'<span style="font-size:.9rem;color:#999;align-self:center">{e(w)}</span>'
                 else:
-                    pw_h += (f'<span class="pw" style="background:{t["color"]}" title="{e(t["label"])}({e(t["flag"])})">'
-                             f'<span class="w">{e(w)}</span><span class="ft">{e(t["flag"])}</span></span>')
+                    pw_h += (
+                        f'<span class="pw" style="background:{t["color"]}" '
+                        f'title="{e(t["label"])}({e(t["flag"])})">'
+                        f'<span class="w">{e(w)}</span>'
+                        f'<span class="ft">{e(t["flag"])}</span></span>'
+                    )
                 seen.setdefault(t["label"], t["color"])
             pw_h += "</div>"
             st.markdown(pw_h, unsafe_allow_html=True)
             leg_h = '<div class="pos-legend">' + "".join(
-                f'<div class="leg"><span class="leg-dot" style="background:{c}"></span><span>{e(lbl)}</span></div>'
+                f'<div class="leg"><span class="leg-dot" style="background:{c}"></span>'
+                f'<span>{e(lbl)}</span></div>'
                 for lbl, c in seen.items()
             ) + "</div>"
             st.markdown(leg_h, unsafe_allow_html=True)
@@ -313,28 +370,31 @@ def render():
 
         # 分词算法对比
         sec_header("📊 分词算法对比分析", "green")
-        st.caption(f'分析句子：**"{ambiguous}"**')
+        short = main_text.strip()[:30] + ("…" if len(main_text.strip()) > 30 else "")
+        st.caption(f'分析句子：**"{short}"**')
 
         all_cnt = Counter()
-        for k in ["precise","full","search"]:
-            for w in set(amb[k]): all_cnt[w] += 1
+        for k in ["precise", "full", "search"]:
+            for w in set(amb[k]):
+                all_cnt[w] += 1
         diff_words = {w for w, cnt in all_cnt.items() if cnt < 3}
 
         ac1, ac2, ac3 = st.columns(3, gap="medium")
         ALGO_DEFS = [
             ("精确模式", "precise", "#4e79a7"),
             ("全模式",   "full",    "#f28e2b"),
-            ("搜索引擎模式","search","#e15759"),
+            ("搜索引擎模式", "search", "#e15759"),
         ]
         for acol, (name, key, color) in zip([ac1, ac2, ac3], ALGO_DEFS):
             with acol:
                 words = amb[key]
-                avg   = sum(len(w) for w in words)/max(len(words),1)
+                avg   = sum(len(w) for w in words) / max(len(words), 1)
                 st.markdown(
                     f'<div class="algo-box">'
                     f'<div class="algo-title" style="color:{color};border-color:{color}40">{name}</div>'
                     + chips_html(words, diff_words) +
-                    f'<div class="algo-stats">共 {len(words)} 词 &nbsp;·&nbsp; 唯一 {len(set(words))} 词 &nbsp;·&nbsp; 平均词长 {avg:.2f} 字</div></div>',
+                    f'<div class="algo-stats">共 {len(words)} 词 &nbsp;·&nbsp; '
+                    f'唯一 {len(set(words))} 词 &nbsp;·&nbsp; 平均词长 {avg:.2f} 字</div></div>',
                     unsafe_allow_html=True,
                 )
 
@@ -344,10 +404,10 @@ def render():
 
         st.markdown(
             '<div class="cmp-note"><b>💡 算法说明</b><br>'
-            '<b>精确模式</b>：最精确切分，适合文本分析任务。<br>'
-            '<b>全模式</b>：扫描所有可能词语，召回率高但含冗余（重叠词）。<br>'
-            '<b>搜索引擎模式</b>：在精确模式基础上对长词再次切分，提升召回。<br>'
+            '<b>精确模式</b>：spaCy 统计模型，基于训练语料的最优切分，适合文本分析。<br>'
+            '<b>全模式</b>：字符级拆分，每个汉字独立成词，召回率最高但含大量单字。<br>'
+            '<b>搜索引擎模式</b>：在精确模式基础上对长词（3字+）进行 2-gram 拆分叠加，提升检索覆盖率。<br>'
             '<span style="background:#fef3c7;padding:0 3px;border-radius:3px;color:#92400e">'
-            '🟡 黄色高亮</span>表示各算法切分结果不一致的词，体现分词歧义现象。</div>',
+            '🟡 黄色高亮</span>表示各算法切分结果不一致的词，体现分词粒度差异。</div>',
             unsafe_allow_html=True,
         )

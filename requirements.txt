@@ -27,7 +27,8 @@ fastcoref>=2.1.0
 nltk>=3.8.0
 
 # ── NLP – Chinese ─────────────────────────────────────────────────────────────
-jieba>=0.42.1
+# jieba removed: uses invalid escape sequences (\s, \.) in non-raw strings,
+# which Python 3.14 treats as SyntaxError. Replaced by spaCy zh_core_web_sm.
 zhconv>=1.4.3
 
 # ── ML / Numerics ─────────────────────────────────────────────────────────────
