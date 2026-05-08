@@ -1,18 +1,14 @@
-"""模块3：语义表示与对比分析"""
+"""模块3：语义表示与对比分析（无 gensim，纯 sklearn/numpy 实现）"""
 
-import os
 import re
-import ssl
 import textwrap
-from pathlib import Path
+from collections import Counter
 
 import nltk
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from gensim import downloader as api
-from gensim.models import FastText, KeyedVectors, Word2Vec
 from nltk.tokenize import sent_tokenize
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
@@ -34,14 +30,19 @@ DEFAULT_CORPUS = textwrap.dedent("""
 """).strip()
 
 
+# ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 def split_into_sentences(text):
     normalized = " ".join(text.split())
-    if not normalized: return []
+    if not normalized:
+        return []
     try:
         nltk.data.find("tokenizers/punkt")
     except LookupError:
-        try: nltk.download("punkt", quiet=True)
-        except Exception: pass
+        try:
+            nltk.download("punkt", quiet=True)
+        except Exception:
+            pass
     try:
         sentences = sent_tokenize(normalized)
     except LookupError:
@@ -58,112 +59,160 @@ def vectorize_documents(sentences, mode):
     return matrix, vectorizer.get_feature_names_out()
 
 
-def tokenize_for_word2vec(sentences):
+def tokenize_corpus(sentences):
     tokenized = []
     for sent in sentences:
         tokens = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", sent.lower())
-        if tokens: tokenized.append(tokens)
+        if tokens:
+            tokenized.append(tokens)
     return tokenized
 
 
-@st.cache_resource(show_spinner=False)
-def train_word2vec_model(tokenized_sentences, sg, window, vector_size, min_count, epochs):
-    corpus = [list(x) for x in tokenized_sentences]
-    return Word2Vec(sentences=corpus, sg=sg, window=window, vector_size=vector_size,
-                    min_count=min_count, workers=1, seed=42, epochs=epochs)
+def _cosine_sim(v1, v2):
+    d = np.linalg.norm(v1) * np.linalg.norm(v2)
+    return 0.0 if d == 0 else float(np.dot(v1, v2) / d)
 
 
-@st.cache_resource(show_spinner=False)
-def train_fasttext_model(tokenized_sentences, sg, window, vector_size, min_count, epochs):
-    corpus = [list(x) for x in tokenized_sentences]
-    return FastText(sentences=corpus, sg=sg, window=window, vector_size=vector_size,
-                    min_count=min_count, workers=1, seed=42, epochs=epochs)
-
-
-def average_sentence_vector(sentence, keyed_vectors):
-    tokens = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", sentence.lower())
-    if not tokens: return None, []
-    vectors, valid_tokens = [], []
-    for token in tokens:
-        try:
-            vectors.append(keyed_vectors[token]); valid_tokens.append(token)
-        except KeyError:
-            continue
-    if not vectors: return None, []
-    return np.mean(vectors, axis=0), valid_tokens
-
-
-def cosine_similarity(vec1, vec2):
-    denom = float(np.linalg.norm(vec1) * np.linalg.norm(vec2))
-    return 0.0 if denom == 0 else float(np.dot(vec1, vec2) / denom)
-
+# ── 词-共现矩阵 + SVD 词向量（Word2Vec 替代） ─────────────────────────────────
 
 @st.cache_resource(show_spinner=False)
-def load_pretrained_glove(model_name="glove-twitter-25"):
-    base_dir = Path(os.environ.get("GENSIM_DATA_DIR", str(Path.home()/"gensim-data")))
-    local_candidates = [
-        base_dir/model_name/f"{model_name}.gz",
-        base_dir/model_name/f"{model_name}.txt",
-    ]
-    for local_path in local_candidates:
-        if local_path.exists():
-            for no_header in (False, True):
-                try:
-                    model = KeyedVectors.load_word2vec_format(str(local_path), binary=False, no_header=no_header)
-                    return model, f"Loaded from local cache: {local_path}"
-                except Exception:
-                    continue
-    attempts = []
-    for ctx_fn, label in [
-        (None, "default"),
-        (lambda: ssl.create_default_context(cafile=__import__("certifi").where()), "certifi"),
-        (ssl._create_unverified_context, "unverified_ssl"),
-    ]:
-        try:
-            if ctx_fn:
-                orig = ssl._create_default_https_context
-                ssl._create_default_https_context = ctx_fn if callable(ctx_fn) and label == "unverified_ssl" else lambda: ctx_fn()
-            model = api.load(model_name)
-            if ctx_fn and label != "default":
-                ssl._create_default_https_context = orig
-            return model, f"Downloaded via {label} context."
-        except Exception as exc:
-            attempts.append(f"{label}: {exc}")
-            try:
-                ssl._create_default_https_context = orig
-            except Exception:
-                pass
-    raise RuntimeError("Unable to load glove-twitter-25.\n" + "\n".join(attempts))
+def build_cooc_word_vectors(tokenized_tuple, window, vector_size, min_count):
+    """共现矩阵 + TruncatedSVD，产生与 Word2Vec 原理相近的分布式词向量。"""
+    tokenized = [list(s) for s in tokenized_tuple]
+    freq = Counter(w for sent in tokenized for w in sent)
+    vocab_list = sorted(w for w, c in freq.items() if c >= min_count)
+    if len(vocab_list) < 3:
+        return None, [], {}
+    word_to_idx = {w: i for i, w in enumerate(vocab_list)}
+    n = len(vocab_list)
 
+    matrix = np.zeros((n, n), dtype=np.float32)
+    for sent in tokenized:
+        for i, word in enumerate(sent):
+            if word not in word_to_idx:
+                continue
+            wi = word_to_idx[word]
+            lo, hi = max(0, i - window), min(len(sent), i + window + 1)
+            for j in range(lo, hi):
+                if j != i and sent[j] in word_to_idx:
+                    matrix[wi][word_to_idx[sent[j]]] += 1.0
+
+    n_comp = min(vector_size, n - 1, 150)
+    svd = TruncatedSVD(n_components=n_comp, random_state=42)
+    vecs = svd.fit_transform(matrix)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    return vecs / norms, vocab_list, word_to_idx
+
+
+def most_similar(word, vecs, vocab_list, word_to_idx, topn=5):
+    if word not in word_to_idx or vecs is None:
+        return []
+    idx = word_to_idx[word]
+    sims = vecs @ vecs[idx]
+    sims[idx] = -2.0
+    top_idx = np.argsort(sims)[::-1][:topn]
+    return [(vocab_list[i], float(sims[i])) for i in top_idx]
+
+
+def analogy(pos_a, neg_b, pos_c, vecs, vocab_list, word_to_idx, topn=5):
+    """向量运算：pos_a − neg_b + pos_c → 最近邻。"""
+    exclude = {pos_a, neg_b, pos_c}
+    missing = [w for w in exclude if w not in word_to_idx]
+    if missing:
+        return None, missing
+    result_vec = vecs[word_to_idx[pos_a]] - vecs[word_to_idx[neg_b]] + vecs[word_to_idx[pos_c]]
+    norm = np.linalg.norm(result_vec)
+    if norm > 0:
+        result_vec = result_vec / norm
+    sims = vecs @ result_vec
+    candidates = [(vocab_list[i], float(sims[i]))
+                  for i in np.argsort(sims)[::-1]
+                  if vocab_list[i] not in exclude]
+    return candidates[:topn], []
+
+
+# ── 字符 n-gram + SVD 词向量（FastText 替代） ─────────────────────────────────
+
+@st.cache_resource(show_spinner=False)
+def build_char_word_vectors(tokenized_tuple, vector_size, min_count):
+    """字符 3-6-gram TF-IDF + SVD，复现 FastText 处理 OOV 的能力。"""
+    tokenized = [list(s) for s in tokenized_tuple]
+    freq = Counter(w for sent in tokenized for w in sent)
+    vocab_list = sorted(w for w, c in freq.items() if c >= min_count)
+    if len(vocab_list) < 3:
+        return None, [], {}, None, None
+
+    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 6), min_df=1)
+    char_matrix = vectorizer.fit_transform(vocab_list)
+
+    n_comp = min(vector_size, char_matrix.shape[0] - 1, char_matrix.shape[1] - 1, 100)
+    if n_comp < 2:
+        return None, vocab_list, {w: i for i, w in enumerate(vocab_list)}, vectorizer, None
+
+    svd = TruncatedSVD(n_components=n_comp, random_state=42)
+    vecs = svd.fit_transform(char_matrix)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    word_to_idx = {w: i for i, w in enumerate(vocab_list)}
+    return vecs / norms, vocab_list, word_to_idx, vectorizer, svd
+
+
+def get_oov_vector(oov_word, vecs, vocab_list, word_to_idx, vectorizer, svd):
+    """利用字符 n-gram 为词汇表外的词生成向量（FastText 核心能力）。"""
+    if vectorizer is None or svd is None:
+        return None
+    try:
+        char_vec = vectorizer.transform([oov_word])
+        raw = svd.transform(char_vec)[0]
+        n = np.linalg.norm(raw)
+        return raw / n if n > 0 else raw
+    except Exception:
+        return None
+
+
+def avg_sentence_vec(sentence, vecs, word_to_idx):
+    tokens = re.findall(r"[A-Za-z]+", sentence.lower())
+    v_list, t_list = [], []
+    for t in tokens:
+        if t in word_to_idx:
+            v_list.append(vecs[word_to_idx[t]])
+            t_list.append(t)
+    if not v_list:
+        return None, []
+    return np.mean(v_list, axis=0), t_list
+
+
+# ── 渲染主函数 ────────────────────────────────────────────────────────────────
 
 def render():
     render_module_header(
         "m3",
         "🔬 语义表示与对比分析",
-        "统计语义表示 · Word2Vec · GloVe · FastText · 句子嵌入",
+        "统计语义表示 · 共现矩阵词向量 · 向量类比推理 · 字符 n-gram 嵌入",
     )
 
     with st.expander("📖 功能说明与技术栈", expanded=False):
         st.markdown("""
 | 功能 | 说明 | 技术 / 库 |
 |------|------|-----------|
-| TF-IDF / LSA | 用词频-逆文档频率构建词-文档矩阵，再经截断 SVD 降维，得到低维语义空间表示 | `scikit-learn` (TfidfVectorizer, TruncatedSVD) |
-| Word2Vec 训练 | 在自定义语料上以 CBOW / Skip-gram 训练词向量，展示近邻词与向量加减运算 | `gensim` Word2Vec |
-| GloVe 类比推理 | 加载预训练 GloVe 向量，完成"king − man + woman ≈ queen"类型的类比推理任务 | `gensim` (glove-wiki-gigaword-100) |
-| FastText & 句子嵌入 | 子词级词向量（可处理未登录词），以及句子级平均向量的相似度计算与可视化 | `gensim` FastText |
+| TF-IDF / LSA | 构建词-文档矩阵，经截断 SVD 降维得到低维语义空间 | `scikit-learn` (TfidfVectorizer, TruncatedSVD) |
+| 共现矩阵词向量 | 统计词语共现频次，SVD 分解得到分布式词向量（Word2Vec 同源思路） | `numpy`, `scikit-learn` TruncatedSVD |
+| 向量类比推理 | 在 LSA 词空间执行 A − B + C 类比运算，验证语义结构 | `numpy` 向量运算 |
+| 字符 n-gram 嵌入 | 字符级 TF-IDF + SVD，可为词汇表外词（OOV）生成向量（FastText 同源思路） | `scikit-learn` char_wb TF-IDF |
 """)
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "1️⃣ 统计表示 (TF-IDF/LSA)",
-        "2️⃣ Word2Vec 训练",
-        "3️⃣ 预训练 GloVe",
-        "4️⃣ FastText & Sent2Vec",
+        "2️⃣ 共现矩阵词向量",
+        "3️⃣ 向量类比推理",
+        "4️⃣ 字符 n-gram 嵌入 (FastText 思路)",
     ])
 
-    # ── Tab 1 ──────────────────────────────────────────────────────────────────
+    # ── Tab 1：TF-IDF + LSA ────────────────────────────────────────────────────
     with tab1:
         st.subheader("传统统计文本表示（TF-IDF + LSA）")
-        st.write("输入英文语料（推荐 500-1000 词），系统将切分为句子文档、计算 TF-IDF 并以 LSA 2D 投影可视化。")
+        st.write("输入英文语料（推荐 500-1000 词），系统切分为句子、计算 TF-IDF，并以 LSA 2D 投影可视化。")
 
         text_input = st.text_area("English Corpus", value=DEFAULT_CORPUS, height=280,
                                   help="可替换为自己的语料。")
@@ -176,11 +225,12 @@ def render():
         st.caption(f"Word count: {word_count} | Sentence count: {len(sentences)}")
 
         if len(sentences) < 2:
-            st.error("Need at least two sentences to build sentence-level document vectors.")
+            st.error("需要至少两个句子才能构建文档级向量。")
             return
 
         st.markdown("**Sentence-Level Documents**")
-        sent_df = pd.DataFrame({"Sentence ID": [f"S{i+1}" for i in range(len(sentences))], "Text": sentences})
+        sent_df = pd.DataFrame({"Sentence ID": [f"S{i+1}" for i in range(len(sentences))],
+                                "Text": sentences})
         st.dataframe(sent_df, use_container_width=True, height=220)
 
         tfidf_matrix, tfidf_terms = vectorize_documents(sentences, mode="TF-IDF")
@@ -199,157 +249,203 @@ def render():
                                }).style.format({"Mean TF-IDF Weight": "{:.4f}"}))
 
         st.markdown("**LSA (TruncatedSVD) 2D Vocabulary Projection**")
-        basis = st.radio("Choose matrix for LSA:", ["TF-IDF", "One-hot (CountVectorizer)"], horizontal=True)
-        lsa_matrix, lsa_terms = vectorize_documents(sentences, mode="TF-IDF" if basis == "TF-IDF" else "One-hot")
+        basis = st.radio("Choose matrix for LSA:", ["TF-IDF", "One-hot (CountVectorizer)"],
+                         horizontal=True)
+        lsa_matrix, lsa_terms = vectorize_documents(
+            sentences, mode="TF-IDF" if basis == "TF-IDF" else "One-hot")
         if lsa_matrix.shape[1] < 2:
-            st.error("Need at least two unique vocabulary terms.")
+            st.error("需要至少两个不同词汇。")
             return
         svd = TruncatedSVD(n_components=2, random_state=42)
         svd.fit(lsa_matrix)
         term_coords = svd.components_.T
         term_strength = np.asarray(lsa_matrix.sum(axis=0)).ravel()
-        plot_df = pd.DataFrame({"Term": lsa_terms, "LSA-1": term_coords[:,0],
-                                "LSA-2": term_coords[:,1], "Strength": term_strength})
-        fig = px.scatter(plot_df, x="LSA-1", y="LSA-2", size="Strength", hover_name="Term",
+        plot_df = pd.DataFrame({"Term": lsa_terms, "LSA-1": term_coords[:, 0],
+                                "LSA-2": term_coords[:, 1], "Strength": term_strength})
+        fig = px.scatter(plot_df, x="LSA-1", y="LSA-2", size="Strength",
+                         hover_name="Term",
                          title=f"2D LSA Term Space ({basis})", opacity=0.85)
         fig.update_traces(marker=dict(line=dict(width=0.5, color="white")))
         st.plotly_chart(fig, use_container_width=True)
 
-    # ── Tab 2 ──────────────────────────────────────────────────────────────────
+    # ── Tab 2：共现矩阵词向量 ──────────────────────────────────────────────────
     with tab2:
-        st.subheader("Word2Vec 实时训练与测试")
-        w2v_text = st.text_area("Training Corpus (Word2Vec)", value=DEFAULT_CORPUS, height=240,
+        st.subheader("共现矩阵词向量（Word2Vec 同源思路）")
+        st.info("**原理**：统计词语在滑动窗口内的共现频次，对共现矩阵做截断 SVD，"
+                "得到低维分布式词向量。与 Word2Vec 同源于分布假设：语义相近的词出现在相同上下文中。")
+
+        w2v_text = st.text_area("Training Corpus", value=DEFAULT_CORPUS, height=200,
                                 key="w2v_corpus")
         w2v_sentences = split_into_sentences(w2v_text)
-        tokenized_sentences = tokenize_for_word2vec(w2v_sentences)
-        vocab_preview = sorted({w for sent in tokenized_sentences for w in sent})
+        tokenized = tokenize_corpus(w2v_sentences)
 
-        if len(tokenized_sentences) < 2:
-            st.error("Need at least two valid sentences with words to train Word2Vec.")
+        if len(tokenized) < 2:
+            st.error("需要至少两个有效句子。")
             return
 
         col1, col2 = st.columns(2)
         with col1:
-            arch = st.radio("Training Architecture", ["CBOW (sg=0)", "Skip-Gram (sg=1)"],
-                            horizontal=True, key="w2v_arch")
-            window    = st.slider("Context Window", 2, 10, 5)
-            min_count = st.slider("Min Word Count", 1, 3, 1)
+            window    = st.slider("Context Window", 2, 10, 5, key="w2v_window")
+            min_count = st.slider("Min Word Count", 1, 3, 1, key="w2v_min")
         with col2:
-            vector_size = st.slider("Embedding Dimension", 20, 200, 100, 10)
-            epochs      = st.slider("Training Epochs", 10, 200, 80, 10)
-            st.caption(f"Sentences: {len(tokenized_sentences)} | Vocab: {len(vocab_preview)}")
+            vector_size = st.slider("Embedding Dimension", 20, 150, 80, 10, key="w2v_dim")
 
-        sg = 0 if arch.startswith("CBOW") else 1
-        tokenized_tuple = tuple(tuple(s) for s in tokenized_sentences)
-        word2vec_model = train_word2vec_model(tokenized_tuple, sg, window, vector_size, min_count, epochs)
+        tokenized_tuple = tuple(tuple(s) for s in tokenized)
+        with st.spinner("构建共现矩阵并 SVD 分解…"):
+            vecs, vocab_list, word_to_idx = build_cooc_word_vectors(
+                tokenized_tuple, window, vector_size, min_count)
 
-        st.markdown(f"**Model Ready** — Current mode: `{arch}`")
-        query_word = st.text_input("Find top-5 most similar words", value="library", key="w2v_query").strip().lower()
+        if vecs is None or len(vocab_list) == 0:
+            st.error("词汇量过小，请增加语料或减小 Min Word Count。")
+            return
+
+        st.success(f"词向量就绪 — 词汇量: {len(vocab_list)} | 维度: {vecs.shape[1]}")
+        vocab_preview = vocab_list[:20]
+
+        query_word = st.text_input(
+            "查询最相似词（Top-5）", value="library", key="w2v_query").strip().lower()
 
         if not query_word:
-            st.info("Please input one word.")
-        elif query_word not in word2vec_model.wv.key_to_index:
-            st.warning("OOV. Try: " + ", ".join(vocab_preview[:15]))
+            st.info("请输入一个词。")
+        elif query_word not in word_to_idx:
+            st.warning("OOV。词汇表示例：" + ", ".join(vocab_preview))
         else:
-            similar_words = word2vec_model.wv.most_similar(query_word, topn=5)
-            st.markdown("**Top 5 Most Similar Words**")
-            st.table(pd.DataFrame(similar_words, columns=["Word", "Cosine Similarity"]
+            similar = most_similar(query_word, vecs, vocab_list, word_to_idx, topn=5)
+            st.markdown("**Top 5 最相似词**")
+            st.table(pd.DataFrame(similar, columns=["Word", "Cosine Similarity"]
                                   ).style.format({"Cosine Similarity": "{:.4f}"}))
 
-    # ── Tab 3 ──────────────────────────────────────────────────────────────────
+        st.markdown("**2D 词空间可视化（PCA on SVD vectors）**")
+        if len(vocab_list) >= 20:
+            show_n = st.slider("显示词数", 10, min(60, len(vocab_list)), 30, key="w2v_show")
+            freq = Counter(w for sent in tokenized for w in sent)
+            top_words = [w for w, _ in freq.most_common(show_n) if w in word_to_idx]
+            indices = [word_to_idx[w] for w in top_words]
+            coords_2d = TruncatedSVD(n_components=2, random_state=0).fit_transform(
+                vecs[indices])
+            scatter_df = pd.DataFrame({"Word": top_words, "x": coords_2d[:, 0],
+                                       "y": coords_2d[:, 1]})
+            fig2 = px.scatter(scatter_df, x="x", y="y", text="Word",
+                              title="词向量 2D 投影（高频词）")
+            fig2.update_traces(textposition="top center", marker_size=6)
+            fig2.update_layout(height=440)
+            st.plotly_chart(fig2, use_container_width=True)
+
+    # ── Tab 3：向量类比推理 ────────────────────────────────────────────────────
     with tab3:
-        st.subheader("预训练 GloVe：词语类比与相似度")
-        try:
-            with st.spinner("Loading pretrained model `glove-twitter-25`…"):
-                glove_model, load_status = load_pretrained_glove("glove-twitter-25")
-        except Exception as exc:
-            st.error("Failed to load `glove-twitter-25`. Check network/SSL or pre-download to gensim cache.")
-            st.exception(exc)
-            return
+        st.subheader("向量类比推理（A − B + C ≈ ?）")
+        st.info("在共现矩阵词向量空间中执行类比运算，验证"语义关系可通过向量差表达"这一核心假设。"
+                "GloVe、Word2Vec 的类比能力均来源于此。")
 
-        st.caption(f"Vocabulary: {len(glove_model.key_to_index)} | Dim: {glove_model.vector_size} | {load_status}")
+        if "vecs" not in dir() or vecs is None:
+            st.warning("请先在 Tab 2 中构建词向量。")
+        else:
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                word_a = st.text_input("A（正向）", value="library",   key="ana_a").strip().lower()
+            with col_b:
+                word_b = st.text_input("B（负向）", value="book",      key="ana_b").strip().lower()
+            with col_c:
+                word_c = st.text_input("C（正向）", value="knowledge", key="ana_c").strip().lower()
 
-        st.markdown("**Word Analogy Calculator (A − B + C)**")
-        col_a, col_b, col_c = st.columns(3)
-        with col_a: word_a = st.text_input("A", value="king", key="glove_analogy_a").strip().lower()
-        with col_b: word_b = st.text_input("B", value="man",  key="glove_analogy_b").strip().lower()
-        with col_c: word_c = st.text_input("C", value="woman",key="glove_analogy_c").strip().lower()
+            st.caption("运算：**A − B + C** = ?  "
+                       "（类似经典 `king − man + woman ≈ queen`）")
 
-        if st.button("Run Word Analogy", key="glove_run_analogy"):
-            missing = [w for w in [word_a, word_b, word_c] if w not in glove_model.key_to_index]
-            if missing: st.warning("OOV: " + ", ".join(missing))
-            else:
-                result_vector = glove_model[word_a] - glove_model[word_b] + glove_model[word_c]
-                candidates = [(w, s) for w, s in glove_model.similar_by_vector(result_vector, topn=10)
-                              if w not in {word_a, word_b, word_c}]
-                if not candidates: st.warning("No valid candidate found.")
-                else:
-                    best_word, best_score = candidates[0]
-                    st.success(f"Closest word: `{best_word}` (cosine similarity: {best_score:.4f})")
-                    st.table(pd.DataFrame(candidates[:5], columns=["Word","Cosine Similarity"]
+            if st.button("执行类比推理", key="run_analogy"):
+                candidates, missing = analogy(word_a, word_b, word_c,
+                                              vecs, vocab_list, word_to_idx)
+                if missing:
+                    st.warning("以下词不在词汇表中：" + ", ".join(missing))
+                elif candidates:
+                    best, best_score = candidates[0]
+                    st.success(f"最接近结果：`{best}`（余弦相似度: {best_score:.4f}）")
+                    st.table(pd.DataFrame(candidates, columns=["Word", "Cosine Similarity"]
                                          ).style.format({"Cosine Similarity": "{:.4f}"}))
+                else:
+                    st.warning("未找到有效候选词。")
 
-        st.markdown("**Word Similarity Score**")
-        sc1, sc2 = st.columns(2)
-        with sc1: sim_word1 = st.text_input("Word 1", value="car", key="glove_sim_word1").strip().lower()
-        with sc2: sim_word2 = st.text_input("Word 2", value="bus", key="glove_sim_word2").strip().lower()
+            st.markdown("**词语相似度计算**")
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                sim_w1 = st.text_input("词 1", value="library", key="sim_w1").strip().lower()
+            with sc2:
+                sim_w2 = st.text_input("词 2", value="reading",  key="sim_w2").strip().lower()
 
-        if st.button("Compute Similarity", key="glove_compute_similarity"):
-            missing = [w for w in [sim_word1, sim_word2] if w not in glove_model.key_to_index]
-            if missing: st.warning("OOV: " + ", ".join(missing))
-            else:
-                st.metric("Cosine Similarity", f"{glove_model.similarity(sim_word1, sim_word2):.4f}")
+            if st.button("计算余弦相似度", key="compute_sim"):
+                miss = [w for w in [sim_w1, sim_w2] if w not in word_to_idx]
+                if miss:
+                    st.warning("OOV：" + ", ".join(miss))
+                else:
+                    score = _cosine_sim(vecs[word_to_idx[sim_w1]],
+                                        vecs[word_to_idx[sim_w2]])
+                    st.metric("Cosine Similarity", f"{score:.4f}")
 
-    # ── Tab 4 ──────────────────────────────────────────────────────────────────
+    # ── Tab 4：字符 n-gram 嵌入 ───────────────────────────────────────────────
     with tab4:
-        st.subheader("FastText & Sentence-Level Representation (Sent2Vec)")
-        ft_tokenized_sentences = tokenized_sentences
-        if len(ft_tokenized_sentences) < 2:
-            st.error("Need at least two tokenized sentences.")
+        st.subheader("字符 n-gram 嵌入（FastText 同源思路）")
+        st.info("**FastText 核心思想**：每个词由其字符 n-gram 集合表达，即使词汇表外的词（OOV）"
+                "也能通过共享 n-gram 获得向量。本 Tab 用 `scikit-learn` 字符 TF-IDF + SVD 复现该能力。")
+
+        ft_tokenized = tokenize_corpus(split_into_sentences(DEFAULT_CORPUS))
+        ft_tuple = tuple(tuple(s) for s in ft_tokenized)
+
+        ft_dim     = st.slider("Embedding Dimension", 20, 100, 50, 10, key="ft_dim")
+        ft_min     = st.slider("Min Word Count", 1, 3, 1, key="ft_min")
+
+        with st.spinner("训练字符 n-gram 嵌入…"):
+            ft_result = build_char_word_vectors(ft_tuple, ft_dim, ft_min)
+        ft_vecs, ft_vocab, ft_w2i, ft_vec, ft_svd = ft_result
+
+        if ft_vecs is None:
+            st.error("词汇量过小，无法构建字符嵌入。")
             return
 
-        st.caption(f"Corpus: {len(ft_tokenized_sentences)} sentences | Vocab: {len(vocab_preview)}")
-        with st.spinner("Training FastText model…"):
-            fasttext_model = train_fasttext_model(tokenized_tuple, sg, window, vector_size, min_count, epochs)
+        st.success(f"字符嵌入就绪 — 词汇量: {len(ft_vocab)} | 维度: {ft_vecs.shape[1]}")
 
-        st.markdown("**OOV Test: Word2Vec vs FastText**")
-        oov_word = st.text_input("Potentially misspelled word (e.g., computeer)",
-                                 value="computeer", key="oov_word_test").strip().lower()
+        st.markdown("**OOV 测试：Word2Vec（共现矩阵）vs FastText（字符 n-gram）**")
+        oov_word = st.text_input(
+            "输入一个可能拼写错误的词（如 computeer）",
+            value="computeer", key="oov_test").strip().lower()
 
-        if st.button("Run OOV Comparison", key="run_oov_compare"):
-            try:
-                _ = word2vec_model.wv[oov_word]
-                st.success("Word2Vec: This word exists in vocabulary.")
-            except KeyError:
-                st.warning("Word2Vec: OOV (not in vocabulary).")
-            try:
-                ft_similar = fasttext_model.wv.most_similar(oov_word, topn=5)
-                st.success("FastText: Vector computed successfully.")
-                query_vec = fasttext_model.wv[oov_word]
-                ft_rows = [(w, cs, float(np.linalg.norm(query_vec - fasttext_model.wv[w])))
-                           for w, cs in ft_similar]
-                st.table(pd.DataFrame(ft_rows, columns=["FastText Similar Word","Cosine Similarity","Euclidean Distance"]
-                                      ).style.format({"Cosine Similarity":"{:.8f}","Euclidean Distance":"{:.8f}"}))
-            except KeyError:
-                st.warning("FastText could not compose a vector. Try a longer alphabetic word.")
+        if st.button("运行 OOV 对比", key="run_oov"):
+            # 共现词向量：仅表内词有效
+            if oov_word in word_to_idx:
+                st.success(f"共现矩阵词向量：词汇表内 ✓（词汇表大小 {len(vocab_list)}）")
+            else:
+                st.warning("共现矩阵词向量：**OOV** — 无法生成向量")
 
-        st.markdown("**Sent2Vec (Average Pooling with FastText Vectors)**")
+            # 字符 n-gram：可处理 OOV
+            oov_vec = get_oov_vector(oov_word, ft_vecs, ft_vocab, ft_w2i, ft_vec, ft_svd)
+            if oov_vec is not None:
+                sims = ft_vecs @ oov_vec
+                top_idx = np.argsort(sims)[::-1][:5]
+                similar_ft = [(ft_vocab[i], float(sims[i])) for i in top_idx]
+                st.success("字符 n-gram 嵌入：**OOV 向量已生成** ✓（基于字符 n-gram 组合）")
+                st.table(pd.DataFrame(similar_ft,
+                                      columns=["FastText-style Similar Word", "Cosine Similarity"]
+                                      ).style.format({"Cosine Similarity": "{:.4f}"}))
+            else:
+                st.warning("字符 n-gram 嵌入：无法为该词生成向量（字符序列过短）。")
+
+        st.markdown("**句子相似度（平均词向量）**")
         sent_col1, sent_col2 = st.columns(2)
         with sent_col1:
-            sentence_1 = st.text_area("Sentence 1",
-                value="The library provides digital archives and coding workshops that help students learn practical skills.",
-                key="sent2vec_sentence1", height=110)
+            sentence_1 = st.text_area(
+                "Sentence 1",
+                value="The library provides digital archives and coding workshops.",
+                key="sent1", height=100)
         with sent_col2:
-            sentence_2 = st.text_area("Sentence 2",
-                value="Students improve their abilities through community projects, archived data, and collaborative programming activities.",
-                key="sent2vec_sentence2", height=110)
+            sentence_2 = st.text_area(
+                "Sentence 2",
+                value="Students learn practical skills through community programming projects.",
+                key="sent2", height=100)
 
-        if st.button("Compute Sentence Similarity", key="compute_sent2vec_similarity"):
-            vec1, tokens1 = average_sentence_vector(sentence_1, fasttext_model.wv)
-            vec2, tokens2 = average_sentence_vector(sentence_2, fasttext_model.wv)
-            if vec1 is None or vec2 is None:
-                st.warning("Please provide two non-empty English sentences.")
+        if st.button("计算句子相似度", key="sent_sim_btn"):
+            v1, t1 = avg_sentence_vec(sentence_1, ft_vecs, ft_w2i)
+            v2, t2 = avg_sentence_vec(sentence_2, ft_vecs, ft_w2i)
+            if v1 is None or v2 is None:
+                st.warning("请输入两个非空英文句子。")
             else:
-                sent_sim = cosine_similarity(vec1, vec2)
-                st.metric("Sentence Cosine Similarity", f"{sent_sim:.4f}")
-                st.caption(f"S1 tokens: {len(tokens1)} | S2 tokens: {len(tokens2)}")
+                score = _cosine_sim(v1, v2)
+                st.metric("Sentence Cosine Similarity", f"{score:.4f}")
+                st.caption(f"S1 有效词: {len(t1)} | S2 有效词: {len(t2)}")
