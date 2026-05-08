@@ -397,9 +397,19 @@ def render():
 
         filename = None
         if use_custom:
-            custom_text = st.text_area("输入英文文本",
-                value="Although the economy is improving, many people still struggle to find jobs. The government has implemented new policies to address this issue.",
-                height=100)
+            if "edu_custom" not in st.session_state:
+                st.session_state["edu_custom"] = "Although the economy is improving, many people still struggle to find jobs. The government has implemented new policies to address this issue."
+            _EDU_EX = [
+                ("经济政策", "Although the economy is improving, many people still struggle to find jobs. The government has implemented new policies to address this issue."),
+                ("科技进步", "While technology has brought many benefits, it has also created new challenges. Because of automation, some industries have lost jobs. However, new sectors have emerged as a result."),
+                ("教育改革", "Since education is the foundation of progress, governments invest heavily in schools. When students receive quality education, they contribute more to society."),
+            ]
+            st.caption("🏷️ 示例文本：")
+            _edu_cols = st.columns(len(_EDU_EX))
+            for _i, (_lbl, _txt) in enumerate(_EDU_EX):
+                if _edu_cols[_i].button(_lbl, key=f"edu_ex_{_i}", use_container_width=True):
+                    st.session_state["edu_custom"] = _txt
+            custom_text = st.text_area("输入英文文本", key="edu_custom", height=100)
             full_text = custom_text
             gold_edus = [EDUSegment(text=s.strip(), boundary_token=s.split()[-1] if s.split() else "",
                                     token_index=0, edu_index=i+1)
@@ -479,8 +489,19 @@ def render():
         st.markdown("基于 **显式连接词 (Explicit Connectives)** 的浅层篇章分析。")
 
         smodule = ShallowDiscourseModule()
-        default_text = "Third-quarter sales in Europe were exceptionally strong, boosted by promotional programs and new products - although weaker foreign currencies reduced the company's earnings."
-        input_text = st.text_area("输入句子进行篇章关系分析", value=default_text, height=100)
+        if "pdtb_text" not in st.session_state:
+            st.session_state["pdtb_text"] = "Third-quarter sales in Europe were exceptionally strong, boosted by promotional programs and new products - although weaker foreign currencies reduced the company's earnings."
+        _PDTB_EX = [
+            ("因果对比", "Third-quarter sales in Europe were exceptionally strong, boosted by promotional programs and new products - although weaker foreign currencies reduced the company's earnings."),
+            ("时序条件", "When the market opened, traders rushed to buy stocks because prices had fallen significantly the day before."),
+            ("转折扩展", "The project was completed on time; however, the budget was exceeded. Furthermore, the team faced unexpected technical challenges."),
+        ]
+        st.caption("🏷️ 示例句子：")
+        _pdtb_cols = st.columns(len(_PDTB_EX))
+        for _i, (_lbl, _txt) in enumerate(_PDTB_EX):
+            if _pdtb_cols[_i].button(_lbl, key=f"pdtb_ex_{_i}", use_container_width=True):
+                st.session_state["pdtb_text"] = _txt
+        input_text = st.text_area("输入句子进行篇章关系分析", key="pdtb_text", height=100)
 
         connectives = smodule.detect_connectives(input_text)
         st.subheader("📌 显式连接词检测")
@@ -531,9 +552,19 @@ def render():
             st.warning("⚠️ fastcoref 未安装 — 将使用基于规则的备选方案")
             st.code("pip install fastcoref", language="bash")
 
-        default_coref_text = """Barack Obama was born in Honolulu, Hawaii. He served as the 44th President of the United States from 2009 to 2017. Obama was the first African-American president in U.S. history. During his presidency, he signed many landmark bills into law. His signature achievement was the Affordable Care Act. After leaving office, he continued his work through the Obama Foundation."""
-
-        input_text = st.text_area("输入包含指代关系的英文段落", value=default_coref_text, height=130)
+        if "coref_text" not in st.session_state:
+            st.session_state["coref_text"] = "Barack Obama was born in Honolulu, Hawaii. He served as the 44th President of the United States from 2009 to 2017. Obama was the first African-American president in U.S. history. During his presidency, he signed many landmark bills into law. His signature achievement was the Affordable Care Act. After leaving office, he continued his work through the Obama Foundation."
+        _COREF_EX = [
+            ("人物链（Obama）", "Barack Obama was born in Honolulu, Hawaii. He served as the 44th President of the United States from 2009 to 2017. Obama was the first African-American president in U.S. history. During his presidency, he signed many landmark bills into law. His signature achievement was the Affordable Care Act. After leaving office, he continued his work through the Obama Foundation."),
+            ("双实体交织", "Apple Inc. was founded by Steve Jobs. He was a visionary entrepreneur. Jobs revolutionized the tech industry with his innovative products. The company he built became one of the most valuable in the world."),
+            ("组织代词", "Microsoft and Google are tech giants. They compete fiercely in many markets. While Microsoft focuses on cloud services, Google dominates search. Both companies invest heavily in artificial intelligence research."),
+        ]
+        st.caption("🏷️ 示例段落：")
+        _coref_cols = st.columns(len(_COREF_EX))
+        for _i, (_lbl, _txt) in enumerate(_COREF_EX):
+            if _coref_cols[_i].button(_lbl, key=f"coref_ex_{_i}", use_container_width=True):
+                st.session_state["coref_text"] = _txt
+        input_text = st.text_area("输入包含指代关系的英文段落", key="coref_text", height=130)
 
         if st.button("🔍 开始分析", type="primary", key="coref_analyze"):
             result = None; use_rule_based = False

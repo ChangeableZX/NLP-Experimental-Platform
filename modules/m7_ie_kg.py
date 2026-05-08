@@ -379,17 +379,34 @@ def render():
         st.markdown('<small style="color:#9ca3af">基于 spaCy 中英文双模型<br>支持 NER + RE + KG</small>', unsafe_allow_html=True)
 
     # ── 主内容 ────────────────────────────────────────────────────────────────
+    _M7_DEFAULT = "Steve Jobs founded Apple. Bill Gates established Microsoft in Albuquerque. Elon Musk leads Tesla and SpaceX."
+    if "m7_text" not in st.session_state:
+        st.session_state["m7_text"] = _M7_DEFAULT
+    if "m7_autorun" not in st.session_state:
+        st.session_state["m7_autorun"] = False
+    _M7_EX = [
+        ("科技英文", "Steve Jobs founded Apple. Bill Gates established Microsoft in Albuquerque. Elon Musk leads Tesla and SpaceX."),
+        ("政治英文", "Barack Obama served as President of the United States. He was born in Honolulu, Hawaii. Obama worked with Congress to pass the Affordable Care Act."),
+        ("中文示例", "马云创立了阿里巴巴集团，总部位于杭州。任正非是华为技术有限公司的创始人，该公司在深圳发展壮大。"),
+    ]
+    st.caption("🏷️ 示例文本：")
+    _m7_cols = st.columns(len(_M7_EX))
+    for _i, (_lbl, _txt) in enumerate(_M7_EX):
+        if _m7_cols[_i].button(_lbl, key=f"m7_ex_{_i}", use_container_width=True):
+            st.session_state["m7_text"] = _txt
+            st.session_state["m7_autorun"] = True
     col_input, col_btn = st.columns([6, 1])
     with col_input:
-        default_text = "Steve Jobs founded Apple. Bill Gates established Microsoft in Albuquerque. Elon Musk leads Tesla and SpaceX."
         user_text = st.text_area("📝 请输入待分析的文本（支持英文或中文）：",
-                                 value=default_text, height=140,
-                                 placeholder="在此粘贴语料…", label_visibility="collapsed")
+                                 height=140,
+                                 placeholder="在此粘贴语料…", label_visibility="collapsed",
+                                 key="m7_text")
     with col_btn:
         st.write(""); st.write("")
         analyze_clicked = st.button("🔎 开始识别", use_container_width=True, type="primary")
 
-    if analyze_clicked or (user_text and user_text != default_text):
+    if analyze_clicked or st.session_state.get("m7_autorun", False):
+        st.session_state["m7_autorun"] = False
         entities    = extract_entities(user_text)
         bio_sequence = generate_bio_sequence(user_text, entities)
         relations   = extract_relations(user_text, entities)

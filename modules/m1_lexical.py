@@ -262,12 +262,28 @@ def render():
 | 算法对比 | 三种分词模式在词数、唯一词数、平均词长三维度上的可视化对比 | `matplotlib` |
 """)
 
+    if "m1_text" not in st.session_state:
+        st.session_state["m1_text"] = ""
+    if "m1_autorun" not in st.session_state:
+        st.session_state["m1_autorun"] = False
+    _M1_EX = [
+        ("📰 新闻语料", "人工智能技术正在深刻改变各行各业的生产方式，推动经济高质量发展。"),
+        ("📖 古诗词", "月落乌啼霜满天，江枫渔火对愁眠。姑苏城外寒山寺，夜半钟声到客船。"),
+        ("💬 口语对话", "今天天气不错，我们去公园散步，顺便买点水果回来吧。"),
+    ]
+    _ex_cols = st.columns(len(_M1_EX))
+    for _i, (_lbl, _txt) in enumerate(_M1_EX):
+        if _ex_cols[_i].button(_lbl, key=f"m1_ex_{_i}", use_container_width=True):
+            st.session_state["m1_text"] = _txt
+            st.session_state["m1_autorun"] = True
     main_text = st.text_area("输入文本", height=130,
                               placeholder="请输入中文文本……",
-                              label_visibility="collapsed")
+                              label_visibility="collapsed",
+                              key="m1_text")
     run = st.button("▶ 开始分析", type="primary")
 
-    if run:
+    if run or st.session_state.get("m1_autorun", False):
+        st.session_state["m1_autorun"] = False
         if not main_text.strip():
             st.error("请先输入文本！")
             return

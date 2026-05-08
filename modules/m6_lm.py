@@ -118,8 +118,19 @@ def render():
 
         with col_right:
             st.subheader("句子概率计算")
-            test_sentence = st.text_input("✏️ 输入测试句子",
-                                          value="The company said it will increase prices .")
+            if "ngram_sent" not in st.session_state:
+                st.session_state["ngram_sent"] = "The company said it will increase prices ."
+            _NG_EX = [
+                ("新闻句", "The company said it will increase prices ."),
+                ("政府句", "The government announced a new economic policy ."),
+                ("低频句", "The quantum flux capacitor reversed the polarity ."),
+            ]
+            st.caption("🏷️ 示例句子：")
+            _ng_cols = st.columns(len(_NG_EX))
+            for _i, (_lbl, _txt) in enumerate(_NG_EX):
+                if _ng_cols[_i].button(_lbl, key=f"ng_ex_{_i}", use_container_width=True):
+                    st.session_state["ngram_sent"] = _txt
+            test_sentence = st.text_input("✏️ 输入测试句子", key="ngram_sent")
             calc_clicked = st.button("🚀 计算概率", use_container_width=True)
 
             if calc_clicked:
@@ -298,9 +309,19 @@ def render():
 
         with col_bert:
             st.subheader("BERT — Masked Language Modeling")
-            bert_input = st.text_input("输入带 [MASK] 的句子",
-                                       value="The man went to the [MASK] to buy some milk.",
-                                       key="bert_input")
+            if "bert_input" not in st.session_state:
+                st.session_state["bert_input"] = "The man went to the [MASK] to buy some milk."
+            _BERT_EX = [
+                ("商店", "The man went to the [MASK] to buy some milk."),
+                ("职业", "She works as a [MASK] at the local hospital."),
+                ("地点", "Paris is the [MASK] of France."),
+            ]
+            st.caption("🏷️ 示例 [MASK] 句：")
+            _bert_cols = st.columns(len(_BERT_EX))
+            for _i, (_lbl, _txt) in enumerate(_BERT_EX):
+                if _bert_cols[_i].button(_lbl, key=f"bert_ex_{_i}", use_container_width=True):
+                    st.session_state["bert_input"] = _txt
+            bert_input = st.text_input("输入带 [MASK] 的句子", key="bert_input")
             if st.button("🔍 BERT 预测", key="bert_btn", use_container_width=True):
                 if "[MASK]" not in bert_input:
                     st.error("请确保输入中包含 `[MASK]` 标记。")
@@ -317,9 +338,19 @@ def render():
 
         with col_gpt2:
             st.subheader("GPT-2 — Causal Language Modeling")
-            gpt2_input = st.text_input("输入前缀 Prompt",
-                                       value="In the future, artificial intelligence will",
-                                       key="gpt2_input")
+            if "gpt2_input" not in st.session_state:
+                st.session_state["gpt2_input"] = "In the future, artificial intelligence will"
+            _GPT2_EX = [
+                ("AI未来", "In the future, artificial intelligence will"),
+                ("科学发现", "Scientists recently discovered that"),
+                ("故事开头", "Once upon a time in a small village,"),
+            ]
+            st.caption("🏷️ 示例 Prompt：")
+            _gpt2_cols = st.columns(len(_GPT2_EX))
+            for _i, (_lbl, _txt) in enumerate(_GPT2_EX):
+                if _gpt2_cols[_i].button(_lbl, key=f"gpt2_ex_{_i}", use_container_width=True):
+                    st.session_state["gpt2_input"] = _txt
+            gpt2_input = st.text_input("输入前缀 Prompt", key="gpt2_input")
             if st.button("✨ GPT-2 生成", key="gpt2_btn", use_container_width=True):
                 with st.spinner("正在加载 GPT-2 并生成文本，首次可能需要下载模型…"):
                     try:
@@ -338,13 +369,32 @@ def render():
         st.header("📈 结果对比与评价指标（困惑度 PPL）")
         st.markdown("使用 **GPT-2** 计算输入句子的 **Perplexity (PPL)**。困惑度越低，说明模型认为该句子越『自然』。")
 
-        ppl_text = st.text_area(
-            "✏️ 输入多段测试句子（每行一句）",
-            value=(
+        if "ppl_text" not in st.session_state:
+            st.session_state["ppl_text"] = (
+                "The cat sat on the mat.\n"
+                "Quantum entanglement revolutionizes cryptography.\n"
+                "asdf ghjk zxcv bnm qwer tyui op."
+            )
+        _PPL_PRESETS = {
+            "自然语言 vs 乱码": (
                 "The cat sat on the mat.\n"
                 "Quantum entanglement revolutionizes cryptography.\n"
                 "asdf ghjk zxcv bnm qwer tyui op."
             ),
+            "新闻 vs 文学 vs 噪音": (
+                "The government announced a new economic stimulus package.\n"
+                "It was the best of times, it was the worst of times.\n"
+                "xlkj fmnb qrst uvwx yzab cdef ghij."
+            ),
+        }
+        st.caption("🏷️ 预设句子组（点击填入）：")
+        _ppl_cols = st.columns(len(_PPL_PRESETS))
+        for _i, (_lbl, _txt) in enumerate(_PPL_PRESETS.items()):
+            if _ppl_cols[_i].button(_lbl, key=f"ppl_ex_{_i}", use_container_width=True):
+                st.session_state["ppl_text"] = _txt
+        ppl_text = st.text_area(
+            "✏️ 输入多段测试句子（每行一句）",
+            key="ppl_text",
             height=200,
         )
 

@@ -161,17 +161,42 @@ def render():
         st.subheader("词义消歧 (Word Sense Disambiguation)")
         st.markdown("通过对比传统 Lesk 算法与 BERT 上下文向量表示来分析多义词。")
 
+        if "sentence1" not in st.session_state:
+            st.session_state["sentence1"] = "I went to the bank to deposit my money."
+        if "sentence2" not in st.session_state:
+            st.session_state["sentence2"] = "I sat by the river bank."
+        if "wsd_target" not in st.session_state:
+            st.session_state["wsd_target"] = "bank"
+        _WSD_SCENES = [
+            ("bank 金融/河岸",
+             "I went to the bank to deposit my money.",
+             "I sat by the river bank.",
+             "bank"),
+            ("crane 起重机/鹤",
+             "The construction crane lifted the steel beams.",
+             "A crane stood quietly at the edge of the lake.",
+             "crane"),
+            ("well 水井/良好",
+             "She drew water from the old stone well.",
+             "He said he was feeling well after his recovery.",
+             "well"),
+        ]
+        st.caption("🏷️ 预设多义词场景（点击填入）：")
+        _sc_cols = st.columns(len(_WSD_SCENES))
+        for _i, (_lbl, _s1, _s2, _tw) in enumerate(_WSD_SCENES):
+            if _sc_cols[_i].button(_lbl, key=f"wsd_sc_{_i}", use_container_width=True):
+                st.session_state["sentence1"] = _s1
+                st.session_state["sentence2"] = _s2
+                st.session_state["wsd_target"] = _tw
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("📄 句子 1")
-            sentence1 = st.text_input("输入包含多义词的句子",
-                value="I went to the bank to deposit my money.", key="sentence1")
+            sentence1 = st.text_input("输入包含多义词的句子", key="sentence1")
         with col2:
             st.subheader("📄 句子 2")
-            sentence2 = st.text_input("输入第二个句子进行对比",
-                value="I sat by the river bank.", key="sentence2")
+            sentence2 = st.text_input("输入第二个句子进行对比", key="sentence2")
 
-        target_word = st.text_input("🎯 目标多义词（如：bank）", value="bank")
+        target_word = st.text_input("🎯 目标多义词（如：bank）", key="wsd_target")
 
         if st.button("🚀 开始分析", type="primary"):
             if not sentence1 or not target_word:
@@ -257,9 +282,20 @@ def render():
         with st.spinner("正在加载 spaCy 模型…"):
             nlp = load_spacy_model()
 
+        if "srl_sentence" not in st.session_state:
+            st.session_state["srl_sentence"] = "Apple is manufacturing new smartphones in China this year."
+        _SRL_EX = [
+            ("科技公司", "Apple is manufacturing new smartphones in China this year."),
+            ("被动结构", "The report was submitted by the manager before the deadline."),
+            ("时间地点", "Scientists discovered a new species in the Amazon rainforest last month."),
+        ]
+        st.caption("🏷️ 示例句子：")
+        _srl_cols = st.columns(len(_SRL_EX))
+        for _i, (_lbl, _txt) in enumerate(_SRL_EX):
+            if _srl_cols[_i].button(_lbl, key=f"srl_ex_{_i}", use_container_width=True):
+                st.session_state["srl_sentence"] = _txt
         srl_sentence = st.text_input(
             "输入句子进行语义角色标注",
-            value="Apple is manufacturing new smartphones in China this year.",
             key="srl_sentence",
         )
 

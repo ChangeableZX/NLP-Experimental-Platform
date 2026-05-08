@@ -2,13 +2,18 @@
 
 import re
 
-import jieba
 import nltk
 import streamlit as st
 from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 from transformers import pipeline
 
 from .common import render_module_header, sec_header
+
+
+def _zh_tokenize(text: str) -> list:
+    """字符级中文分词（用于 BLEU 计算，无需 jieba）"""
+    return list(text.replace(" ", ""))
+
 
 # ── 规则词典（RBMT）────────────────────────────────────────────────────────────
 EN_ZH_DICT: dict[str, str] = {
@@ -102,7 +107,7 @@ def render():
 | 神经机器翻译 (NMT) | 基于 Transformer Seq2Seq 架构进行英→中翻译，模型由 Helsinki-NLP 在平行语料上训练 | `transformers` (Helsinki-NLP/opus-mt-en-zh) |
 | 基于规则翻译 (RBMT) | 使用内置约 250 词的英中词典逐词替换，模拟传统规则翻译方法，展示其局限性 | 内置词典，`re` |
 | NMT vs RBMT 对比 | 并排展示两种方法的译文，对差异词条进行颜色标注，直观呈现两类方法的优劣 | 自定义对比逻辑 |
-| BLEU 自动评测 | 输入参考译文与候选译文，计算 BLEU-1 至 BLEU-4 精确率及综合得分，量化翻译质量 | `NLTK` (sentence_bleu, SmoothingFunction), `jieba` |
+| BLEU 自动评测 | 输入参考译文与候选译文，计算 BLEU-1 至 BLEU-4 精确率及综合得分，量化翻译质量 | `NLTK` (sentence_bleu, SmoothingFunction)，字符级分词 |
 """)
 
     tab1, tab2, tab3 = st.tabs([
@@ -122,10 +127,22 @@ def render():
         col_left, col_right = st.columns(2)
         with col_left:
             st.subheader("📝 输入英文")
+            if "nmt_input" not in st.session_state:
+                st.session_state["nmt_input"] = ""
+            _NMT_EX = [
+                ("人工智能", "Artificial intelligence is transforming the world and changing the way we live and work."),
+                ("气候变化", "Climate change is one of the most urgent challenges facing humanity today."),
+                ("科学探索", "Scientists have discovered a new method to generate clean energy from solar power."),
+            ]
+            st.caption("🏷️ 示例英文句子：")
+            _nmt_cols = st.columns(len(_NMT_EX))
+            for _i, (_lbl, _txt) in enumerate(_NMT_EX):
+                if _nmt_cols[_i].button(_lbl, key=f"nmt_ex_{_i}", use_container_width=True):
+                    st.session_state["nmt_input"] = _txt
             user_input = st.text_area(
                 label="请在下方输入英文句子：",
                 placeholder="e.g. Artificial intelligence is transforming the world.",
-                height=200, key="nmt_input",
+                height=160, key="nmt_input",
             )
             translate_btn = st.button("🚀 开始翻译", use_container_width=True)
 
@@ -310,8 +327,8 @@ def render():
                 st.warning("⚠️ " + "；".join(errors) + "。")
             else:
                 with st.spinner("计算中…"):
-                    ref_tokens  = list(jieba.cut(ref_zh.strip()))
-                    cand_tokens = list(jieba.cut(cand_zh.strip()))
+                    ref_tokens  = _zh_tokenize(ref_zh.strip())
+                    cand_tokens = _zh_tokenize(cand_zh.strip())
                     smoother = SmoothingFunction().method1
                     bleu1 = sentence_bleu([ref_tokens], cand_tokens, weights=(1,0,0,0), smoothing_function=smoother)
                     bleu2 = sentence_bleu([ref_tokens], cand_tokens, weights=(.5,.5,0,0), smoothing_function=smoother)

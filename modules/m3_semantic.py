@@ -302,8 +302,16 @@ def render():
         st.success(f"词向量就绪 — 词汇量: {len(vocab_list)} | 维度: {vecs.shape[1]}")
         vocab_preview = vocab_list[:20]
 
+        if "w2v_query" not in st.session_state:
+            st.session_state["w2v_query"] = "library"
+        _WQ_EX = ["library", "knowledge", "history", "reading"]
+        st.caption("🏷️ 示例查询词：")
+        _wq_cols = st.columns(len(_WQ_EX))
+        for _i, _w in enumerate(_WQ_EX):
+            if _wq_cols[_i].button(_w, key=f"w2v_qex_{_i}", use_container_width=True):
+                st.session_state["w2v_query"] = _w
         query_word = st.text_input(
-            "查询最相似词（Top-5）", value="library", key="w2v_query").strip().lower()
+            "查询最相似词（Top-5）", key="w2v_query").strip().lower()
 
         if not query_word:
             st.info("请输入一个词。")
@@ -340,13 +348,28 @@ def render():
         if "vecs" not in dir() or vecs is None:
             st.warning("请先在 Tab 2 中构建词向量。")
         else:
+            if "ana_a" not in st.session_state: st.session_state["ana_a"] = "library"
+            if "ana_b" not in st.session_state: st.session_state["ana_b"] = "books"
+            if "ana_c" not in st.session_state: st.session_state["ana_c"] = "knowledge"
+            _ANA_EX = [
+                ("library−books+knowledge", "library", "books", "knowledge"),
+                ("history−years+people",    "history", "years", "people"),
+                ("reading−books+library",   "reading", "books", "library"),
+            ]
+            st.caption("🏷️ 预设类比三元组（点击填入）：")
+            _ana_cols = st.columns(len(_ANA_EX))
+            for _i, (_lbl, _a, _b, _c) in enumerate(_ANA_EX):
+                if _ana_cols[_i].button(_lbl, key=f"ana_ex_{_i}", use_container_width=True):
+                    st.session_state["ana_a"] = _a
+                    st.session_state["ana_b"] = _b
+                    st.session_state["ana_c"] = _c
             col_a, col_b, col_c = st.columns(3)
             with col_a:
-                word_a = st.text_input("A（正向）", value="library",   key="ana_a").strip().lower()
+                word_a = st.text_input("A（正向）", key="ana_a").strip().lower()
             with col_b:
-                word_b = st.text_input("B（负向）", value="books",     key="ana_b").strip().lower()
+                word_b = st.text_input("B（负向）", key="ana_b").strip().lower()
             with col_c:
-                word_c = st.text_input("C（正向）", value="knowledge", key="ana_c").strip().lower()
+                word_c = st.text_input("C（正向）", key="ana_c").strip().lower()
 
             st.caption("运算：**A − B + C** = ?  "
                        "（类似经典 `king − man + woman ≈ queen`）")
@@ -403,9 +426,17 @@ def render():
         st.success(f"字符嵌入就绪 — 词汇量: {len(ft_vocab)} | 维度: {ft_vecs.shape[1]}")
 
         st.markdown("**OOV 测试：Word2Vec（共现矩阵）vs FastText（字符 n-gram）**")
+        if "oov_test" not in st.session_state:
+            st.session_state["oov_test"] = "computeer"
+        _OOV_EX = ["computeer", "librari", "histori", "languaje"]
+        st.caption("🏷️ OOV 示例词：")
+        _oov_cols = st.columns(len(_OOV_EX))
+        for _i, _w in enumerate(_OOV_EX):
+            if _oov_cols[_i].button(_w, key=f"oov_ex_{_i}", use_container_width=True):
+                st.session_state["oov_test"] = _w
         oov_word = st.text_input(
             "输入一个可能拼写错误的词（如 computeer）",
-            value="computeer", key="oov_test").strip().lower()
+            key="oov_test").strip().lower()
 
         if st.button("运行 OOV 对比", key="run_oov"):
             # 共现词向量：仅表内词有效

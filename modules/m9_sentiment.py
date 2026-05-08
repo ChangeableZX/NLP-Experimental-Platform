@@ -160,11 +160,27 @@ def render():
 
         with left:
             st.html('<div class="s9-sec-hdr">📝 输入商品评论</div>')
+            if "t1_comment" not in st.session_state:
+                st.session_state["t1_comment"] = ""
+            if "t1_autorun" not in st.session_state:
+                st.session_state["t1_autorun"] = False
+            _T1_EX = [
+                ("好评示例", "这款手机拍照效果非常好，续航也很棒，性价比超高，强烈推荐！"),
+                ("差评示例", "收到货发现屏幕有划痕，客服态度恶劣，完全不处理，非常失望。"),
+                ("中性示例", "商品按时到达，包装完好，和描述基本一致，中规中矩。"),
+            ]
+            st.caption("🏷️ 示例评论：")
+            _t1_cols = st.columns(len(_T1_EX))
+            for _i, (_lbl, _txt) in enumerate(_T1_EX):
+                if _t1_cols[_i].button(_lbl, key=f"t1_ex_{_i}", use_container_width=True):
+                    st.session_state["t1_comment"] = _txt
+                    st.session_state["t1_autorun"] = True
             user_text = st.text_area(
                 "comment_input",
                 placeholder="在此输入中文商品评论…\n\n例如：这款手机拍照效果非常好，续航也很棒，性价比超高，强烈推荐！",
-                height=180,
+                height=130,
                 label_visibility="collapsed",
+                key="t1_comment",
             )
             st.markdown("<br>", unsafe_allow_html=True)
             run_btn = st.button("🔍  开始情感分析", key="t1_run")
@@ -172,7 +188,8 @@ def render():
         with right:
             st.html('<div class="s9-sec-hdr">📈 分析结果</div>')
             result_slot = st.container()
-            if run_btn:
+            if run_btn or st.session_state.get("t1_autorun", False):
+                st.session_state["t1_autorun"] = False
                 if not (user_text or "").strip():
                     result_slot.warning("请先输入一段评论文本！")
                 else:
@@ -250,10 +267,20 @@ def render():
         with col_exp:
             st.html("""<div class="s9-sec-hdr" style="color:#15803d;border-color:rgba(22,163,74,.25)">
                 ✨ 显式情感评价 — Explicit</div>""")
+            if "t2_exp" not in st.session_state:
+                st.session_state["t2_exp"] = ""
+            _EXP_EX = [
+                ("正向显式", "这款手机太棒了！屏幕超级清晰，手感非常好，强烈推荐！"),
+                ("负向显式", "质量极差，做工粗糙，完全不值这个价格，后悔购买，一星差评！"),
+            ]
+            _exp_cols = st.columns(len(_EXP_EX))
+            for _i, (_lbl, _txt) in enumerate(_EXP_EX):
+                if _exp_cols[_i].button(_lbl, key=f"t2_exp_ex_{_i}", use_container_width=True):
+                    st.session_state["t2_exp"] = _txt
             st.text_area(
                 "exp_input",
                 placeholder="请输入带有明显褒贬词的评论…\n\n例如：这款手机太棒了！屏幕超级清晰，手感非常好，强烈推荐！",
-                height=130,
+                height=110,
                 key="t2_exp",
                 label_visibility="collapsed",
             )
@@ -270,10 +297,20 @@ def render():
         with col_imp:
             st.html("""<div class="s9-sec-hdr" style="color:#b45309;border-color:rgba(217,119,6,.25)">
                 🔍 隐式客观描述 — Implicit</div>""")
+            if "t2_imp" not in st.session_state:
+                st.session_state["t2_imp"] = ""
+            _IMP_EX = [
+                ("负向隐式", "手机玩游戏半小时就没电了，充一次电只能用 4 小时。"),
+                ("正向隐式", "这双鞋穿了三个月，鞋底完好，外形依旧如新，每天都在穿。"),
+            ]
+            _imp_cols = st.columns(len(_IMP_EX))
+            for _i, (_lbl, _txt) in enumerate(_IMP_EX):
+                if _imp_cols[_i].button(_lbl, key=f"t2_imp_ex_{_i}", use_container_width=True):
+                    st.session_state["t2_imp"] = _txt
             st.text_area(
                 "imp_input",
                 placeholder="请输入无明显情感词的客观事实描述…\n\n例如：手机玩游戏半小时就没电了，充一次电只能用 4 小时。",
-                height=130,
+                height=110,
                 key="t2_imp",
                 label_visibility="collapsed",
             )

@@ -62,8 +62,18 @@ def render():
     )
 
     sec_header("📝 输入检测文本", "pink")
-    default_text = "The boy saw the man with the telescope."
-    text = st.text_input("请输入需要透视的英文句子：", value=default_text)
+    if "m2_text" not in st.session_state:
+        st.session_state["m2_text"] = "The boy saw the man with the telescope."
+    _M2_EX = [
+        ("PP-attachment 歧义", "The boy saw the man with the telescope."),
+        ("被动句结构", "The book was read by the student in the library."),
+        ("嵌套从句", "She said that the cat that the dog chased ran away."),
+    ]
+    _ex_cols = st.columns(len(_M2_EX))
+    for _i, (_lbl, _txt) in enumerate(_M2_EX):
+        if _ex_cols[_i].button(_lbl, key=f"m2_ex_{_i}", use_container_width=True):
+            st.session_state["m2_text"] = _txt
+    text = st.text_input("请输入需要透视的英文句子：", key="m2_text")
 
     st.divider()
 
