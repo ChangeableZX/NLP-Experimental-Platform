@@ -72,8 +72,8 @@ def render():
         st.markdown("""
 | 功能 | 说明 | 技术 / 库 |
 |------|------|-----------|
-| N-gram 统计模型 | 基于 Reuters 语料统计 N-gram 条件概率，支持 Laplace 加法平滑与 KN 平滑，可计算任意句子概率 | `NLTK` (ngrams, Reuters 语料库) |
-| 字符级 RNN (CharRNN) | 在自定义文本上训练 LSTM 字符级生成模型，支持实时训练过程可视化，并按温度参数采样生成文本 | `PyTorch` (LSTM, Adam 优化器) |
+| N-gram 统计模型 | 基于 Reuters 语料统计 Bigram / Trigram 条件概率，支持 Add-one (Laplace) 加法平滑，逐 N-gram 展示条件概率分解 | `NLTK` (ngrams, Reuters 语料库) |
+| 字符级 RNN (CharRNN) | 在自定义文本上训练简单 RNN 字符级生成模型，实时绘制 Loss 曲线，训练完成后以贪心解码（argmax）续写文本 | `PyTorch` (nn.RNN, Adam 优化器) |
 | BERT 填词预测 | 将句子中的词替换为 [MASK]，让 BERT 预测最可能的填充词，展示预训练语言知识 | `transformers` (bert-base-uncased) |
 | GPT-2 文本生成 | 输入前缀文本，GPT-2 以自回归方式续写，支持调节生成长度与 top-k 采样 | `transformers` (gpt2) |
 | 困惑度 (PPL) 评测 | 计算给定文本在 GPT-2 下的困惑度分值，数值越低代表文本越流畅自然 | `transformers` (GPT2LMHeadModel) |

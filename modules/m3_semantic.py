@@ -198,7 +198,7 @@ def render():
 |------|------|-----------|
 | TF-IDF / LSA | 构建词-文档矩阵，经截断 SVD 降维得到低维语义空间 | `scikit-learn` (TfidfVectorizer, TruncatedSVD) |
 | 共现矩阵词向量 | 统计词语共现频次，SVD 分解得到分布式词向量（Word2Vec 同源思路） | `numpy`, `scikit-learn` TruncatedSVD |
-| 向量类比推理 | 在 LSA 词空间执行 A − B + C 类比运算，验证语义结构 | `numpy` 向量运算 |
+| 向量类比推理 | 在共现矩阵 SVD 词向量空间执行 A − B + C 类比运算，验证「语义关系可通过向量差表达」这一核心假设 | `numpy` 向量运算 |
 | 字符 n-gram 嵌入 | 字符级 TF-IDF + SVD，可为词汇表外词（OOV）生成向量（FastText 同源思路） | `scikit-learn` char_wb TF-IDF |
 """)
 

@@ -258,8 +258,8 @@ def render():
 | 文本规范化 | 繁简体互转、全角→半角、去除特殊符号、统一空白字符 | `zhconv`, `re` |
 | 中文分词 | 精确模式（spaCy 统计模型）、全模式（字符级拆分）、搜索引擎模式（精确词 + 长词拆分）| `spaCy` zh_core_web_sm |
 | 词性标注 | Universal POS 标注（名词/动词/形容词等），彩色标签展示 | `spaCy` zh_core_web_sm |
-| 高频词统计 | 过滤停用词后统计词频，绘制 Top-5 柱状图 | `collections.Counter`, `matplotlib` |
-| 算法对比 | 三种分词模式在词数、唯一词数、平均词长三维度上的可视化对比 | `matplotlib` |
+| 高频词统计 | 过滤停用词后统计词频，绘制 Top-5 横向柱状图 | `collections.Counter`, `plotly` |
+| 算法对比 | 三种分词模式在词数、唯一词数、平均词长三维度上的可视化对比 | `plotly` (make_subplots) |
 """)
 
     if "m1_text" not in st.session_state:

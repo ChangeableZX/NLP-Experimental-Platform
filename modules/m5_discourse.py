@@ -372,7 +372,7 @@ def render():
         st.markdown("""
 | 功能 | 说明 | 技术 / 库 |
 |------|------|-----------|
-| EDU 话语切分 | 将篇章切分为最小话语单元（Elementary Discourse Unit），支持规则基线与 NeuralEDUSeg 两种方式 | `spaCy` (en_core_web_sm)，规则启发式 |
+| EDU 话语切分 | 将篇章切分为最小话语单元（Elementary Discourse Unit），以 spaCy 依存启发式规则为基线，并从 GitHub 拉取 NeuralEDUSeg 金标准数据进行对比展示 | `spaCy` (en_core_web_sm)，`requests`（GitHub 数据拉取） |
 | PDTB 篇章关系分析 | 检测句间显式连接词（"因为"、"然而"等），标注其关系类型（时序 / 条件 / 比较 / 扩展） | 内置 PDTB 连接词词典，`spaCy` |
 | 指代消解 | 识别文中代词 / 名词短语与其所指实体的共指关系，以颜色聚类方式高亮标注 | `fastcoref`（规则方法回退） |
 """)
